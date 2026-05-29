@@ -1,1 +1,45 @@
-[]
+[
+  {
+    "fullName": "Jane Doe",
+    "email": "jane@example.com",
+    "phone": "5551234567",
+    "shippingAddress": "123 Main St",
+    "preferredDeliveryDate": "2026-06-15",
+    "cardNumber": "4111111111111111",
+    "expiration": "12/28",
+    "cvv": "123",
+    "billingAddress": "123 Main St",
+    "acceptTerms": "yes",
+    "id": 1780087114175,
+    "submittedAt": "2026-05-29T20:38:34.175Z"
+  },
+  {
+    "fullName": "Jane Doe",
+    "email": "jane@example.com",
+    "phone": "5551234567",
+    "shippingAddress": "123 Main St",
+    "preferredDeliveryDate": "2026-06-15",
+    "cardNumber": "4111111111111111",
+    "expiration": "12/28",
+    "cvv": "123",
+    "billingAddress": "123 Main St",
+    "acceptTerms": "yes",
+    "id": 1780087114182,
+    "submittedAt": "2026-05-29T20:38:34.182Z"
+  },
+  {
+    "fullName": "Test User",
+    "email": "test@example.com",
+    "phone": "5559876543",
+    "shippingAddress": "456 Oak Ave, Portland, OR 97201",
+    "preferredDeliveryDate": "2026-07-01",
+    "cardNumber": "4111111111111111",
+    "expiration": "06/29",
+    "cvv": "456",
+    "billingAddress": "456 Oak Ave, Portland, OR 97201",
+    "discountCode": "",
+    "acceptTerms": "yes",
+    "id": 1780087122483,
+    "submittedAt": "2026-05-29T20:38:42.483Z"
+  }
+]

@@ -130,6 +130,6 @@ app.get("/submissions", (req, res) => {
 </html>`);
 });
 
-app.listen(PORT, () => {
-  console.log(`Order form server running at http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Order form server running on port ${PORT}`);
 });
