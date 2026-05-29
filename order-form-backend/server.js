@@ -5,35 +5,14 @@ const path = require("path");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SUBMISSIONS_PATH = path.join(__dirname, "submissions.json");
-const INDEX_HTML_PATH = path.join(__dirname, "public", "index.html");
-
 // Parse URL-encoded form bodies from the HTML form POST
 app.use(express.urlencoded({ extended: true }));
 
-function getTomorrowISO() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
-}
-
-/** True when preferredDeliveryDate is tomorrow or later (YYYY-MM-DD) */
-function isDeliveryDateValid(dateStr) {
-  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
-  return dateStr >= getTomorrowISO();
-}
-
-/** True when expiration is MM/YY with a valid month and not before the current month */
-function isExpirationValid(expStr) {
-  if (!expStr || !/^(0[1-9]|1[0-2])\/\d{2}$/.test(expStr)) return false;
-  const [mm, yy] = expStr.split("/");
-  const month = parseInt(mm, 10);
-  const year = 2000 + parseInt(yy, 10);
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth() + 1;
-  if (year < currentYear) return false;
-  if (year === currentYear && month < currentMonth) return false;
-  return true;
+/** Optional phone: empty is OK; otherwise exactly 10 digits, no other characters */
+function isPhoneValid(phone) {
+  const value = String(phone || "").trim();
+  if (!value) return true;
+  return /^\d{10}$/.test(value);
 }
 
 /** Escape text for safe inclusion in HTML responses */
@@ -428,16 +407,7 @@ function renderErrorPage(title, message) {
 </html>`;
 }
 
-// GET / — serve form with tomorrow injected as min on delivery date
-app.get("/", (req, res) => {
-  const minDate = getTomorrowISO();
-  const html = fs
-    .readFileSync(INDEX_HTML_PATH, "utf8")
-    .replace("__DELIVERY_MIN__", minDate);
-  res.type("html").send(html);
-});
-
-// Serve other static assets from public/
+// Serve the static order form from public/
 app.use(express.static(path.join(__dirname, "public")));
 
 /** Read submissions from disk; default to [] if missing or invalid */
@@ -461,26 +431,14 @@ function writeSubmissions(submissions) {
 
 // POST /submit-order — append form data and show confirmation page
 app.post("/submit-order", (req, res) => {
-  if (!isDeliveryDateValid(req.body.preferredDeliveryDate)) {
+  if (!isPhoneValid(req.body.phone)) {
     return res
       .status(400)
       .type("html")
       .send(
         renderErrorPage(
-          "Invalid delivery date",
-          "Preferred delivery date must be after today. Please choose a later date."
-        )
-      );
-  }
-
-  if (!isExpirationValid(req.body.expiration)) {
-    return res
-      .status(400)
-      .type("html")
-      .send(
-        renderErrorPage(
-          "Invalid card expiration",
-          "Expiration must be in MM/YY format and cannot be in the past. Please enter a valid future date."
+          "Invalid phone number",
+          "Phone number must be exactly 10 digits with numbers only."
         )
       );
   }
