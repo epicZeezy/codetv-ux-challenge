@@ -256,18 +256,6 @@
       display: block;
     }
 
-    .field > input#phone:invalid:not(:placeholder-shown) ~ .field-error--format {
-      display: block;
-    }
-
-    input#phone:invalid:not(:placeholder-shown) {
-      border-color: #e04040;
-      background: linear-gradient(90deg, #fff0f0, #ffe0e0, #fff0f0);
-      background-size: 200% 200%;
-      animation: invalidGradient 3s ease infinite;
-      box-shadow: 0 0 0 3px rgba(224, 64, 64, 0.15);
-    }
-
     .field > input[type="date"]:user-invalid:not(:focus) ~ .field-error--date {
       display: block;
     }
@@ -340,7 +328,6 @@
       }
 
       input:not([type="date"]):invalid:not(:placeholder-shown):not(:focus),
-      input#phone:invalid:not(:placeholder-shown),
       input[type="date"]:user-invalid:not(:focus) {
         animation: none;
       }
@@ -388,7 +375,7 @@
     <div class="card">
       <header>
         <h1>Place your order</h1>
-        <p class="subtitle">Fill in your details below to complete your order.</p>
+        <p class="subtitle">Fill in your details below. All fields marked with required validation must be completed.</p>
       </header>
 
       <!-- Native HTML POST — no JavaScript required -->
@@ -431,15 +418,9 @@
                 id="phone"
                 name="phone"
                 autocomplete="tel"
-                inputmode="numeric"
-                maxlength="10"
-                minlength="10"
-                pattern="\d{10}"
-                title="Enter a 10-digit phone number using numbers only."
-                placeholder="5551234567"
-                aria-describedby="phone-error-format"
+                inputmode="tel"
+                placeholder="(555) 123-4567"
               >
-              <p id="phone-error-format" class="field-error field-error--format" role="alert">Phone number must be exactly 10 digits with numbers only.</p>
             </div>
           </div>
         </fieldset>
