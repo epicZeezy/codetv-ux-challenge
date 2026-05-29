@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: codetv-ux-challenge
+    runtime: node
+    plan: free
+    rootDir: order-form-backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "20"

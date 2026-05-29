@@ -1,0 +1,8 @@
+{
+  "name": "ux-codetv-challenge",
+  "private": true,
+  "scripts": {
+    "postinstall": "npm install --prefix order-form-backend",
+    "start": "npm start --prefix order-form-backend"
+  }
+}
