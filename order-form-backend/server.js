@@ -5,11 +5,439 @@ const path = require("path");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SUBMISSIONS_PATH = path.join(__dirname, "submissions.json");
+const INDEX_HTML_PATH = path.join(__dirname, "public", "index.html");
 
 // Parse URL-encoded form bodies from the HTML form POST
 app.use(express.urlencoded({ extended: true }));
 
-// Serve the static order form from public/
+function getTomorrowISO() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/** True when preferredDeliveryDate is tomorrow or later (YYYY-MM-DD) */
+function isDeliveryDateValid(dateStr) {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+  return dateStr >= getTomorrowISO();
+}
+
+/** True when expiration is MM/YY with a valid month and not before the current month */
+function isExpirationValid(expStr) {
+  if (!expStr || !/^(0[1-9]|1[0-2])\/\d{2}$/.test(expStr)) return false;
+  const [mm, yy] = expStr.split("/");
+  const month = parseInt(mm, 10);
+  const year = 2000 + parseInt(yy, 10);
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  if (year < currentYear) return false;
+  if (year === currentYear && month < currentMonth) return false;
+  return true;
+}
+
+/** Escape text for safe inclusion in HTML responses */
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+const DESIGN_TOKENS_CSS = `
+  :root {
+    --bg: #fbf7ef;
+    --paper: #fffdf8;
+    --accent: #6f3ff5;
+    --border: #d8cbb9;
+    --text: #2a2418;
+    --muted: #6b5f4e;
+    --success: #067647;
+    --success-bg: #ecfdf3;
+    --success-border: #abefc6;
+  }
+`;
+
+/** Mask card number, showing only the last four digits */
+function maskCardNumber(cardNumber) {
+  const digits = String(cardNumber || "").replace(/\D/g, "");
+  if (digits.length < 4) return "••••";
+  return `•••• •••• •••• ${digits.slice(-4)}`;
+}
+
+function formatDisplayDate(isoDate) {
+  if (!isoDate) return "";
+  const [year, month, day] = isoDate.split("-").map(Number);
+  if (!year || !month || !day) return isoDate;
+  return new Date(year, month - 1, day).toLocaleDateString("en-US", {
+    weekday: "short",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+function formatSubmittedAt(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+function renderSummaryRow(label, value) {
+  if (value === undefined || value === null || value === "") return "";
+  return `<div class="summary-row"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd></div>`;
+}
+
+function renderSummarySection(title, rowsHtml) {
+  if (!rowsHtml.trim()) return "";
+  return `<section class="summary-section">
+      <h2>${escapeHtml(title)}</h2>
+      <dl class="summary-grid">${rowsHtml}</dl>
+    </section>`;
+}
+
+/** Render submission fields grouped by form section */
+function renderSubmissionSummary(submission, { masked = true } = {}) {
+  const customerRows = [
+    renderSummaryRow("Full name", submission.fullName),
+    renderSummaryRow("Email", submission.email),
+    submission.phone ? renderSummaryRow("Phone", submission.phone) : "",
+  ].join("");
+
+  const shippingRows = [
+    renderSummaryRow("Address", submission.shippingAddress),
+    renderSummaryRow(
+      "Preferred delivery",
+      formatDisplayDate(submission.preferredDeliveryDate)
+    ),
+  ].join("");
+
+  const cardDisplay = masked
+    ? maskCardNumber(submission.cardNumber)
+    : submission.cardNumber;
+  const cvvDisplay = masked ? "•••" : submission.cvv;
+
+  const paymentRows = [
+    renderSummaryRow("Card number", cardDisplay),
+    renderSummaryRow("Expiration", submission.expiration),
+    renderSummaryRow("CVV", cvvDisplay),
+    renderSummaryRow("Billing address", submission.billingAddress),
+    submission.discountCode
+      ? renderSummaryRow("Discount code", submission.discountCode)
+      : "",
+  ].join("");
+
+  const consentRows = [
+    renderSummaryRow(
+      "Terms accepted",
+      submission.acceptTerms === "yes" ? "Yes" : "No"
+    ),
+    renderSummaryRow(
+      "Marketing emails",
+      submission.optInUpdates === "yes" ? "Opted in" : "Not opted in"
+    ),
+  ].join("");
+
+  return [
+    renderSummarySection("Customer Info", customerRows),
+    renderSummarySection("Shipping", shippingRows),
+    renderSummarySection("Payment", paymentRows),
+    renderSummarySection("Consent", consentRows),
+  ].join("");
+}
+
+/** Compact card for the submissions list */
+function renderSubmissionCard(submission) {
+  const name = escapeHtml(submission.fullName || "(no name)");
+  const email = escapeHtml(submission.email || "(no email)");
+  const address = escapeHtml(submission.shippingAddress || "(no address)");
+  const deliveryDate = escapeHtml(
+    formatDisplayDate(submission.preferredDeliveryDate) ||
+      submission.preferredDeliveryDate ||
+      "(no date)"
+  );
+  const submittedAt = escapeHtml(
+    formatSubmittedAt(submission.submittedAt) ||
+      submission.submittedAt ||
+      "(no timestamp)"
+  );
+  const cardSummary = escapeHtml(
+    `${maskCardNumber(submission.cardNumber)} · exp ${submission.expiration || "—"}`
+  );
+
+  return `<article class="submission-card">
+      <header class="submission-card__header">
+        <h2 class="submission-card__name">${name}</h2>
+        <time class="submission-card__time" datetime="${escapeHtml(submission.submittedAt || "")}">${submittedAt}</time>
+      </header>
+      <dl class="submission-card__details">
+        <div class="submission-card__row">
+          <dt>Email</dt>
+          <dd>${email}</dd>
+        </div>
+        <div class="submission-card__row">
+          <dt>Address</dt>
+          <dd>${address}</dd>
+        </div>
+        <div class="submission-card__row">
+          <dt>Delivery</dt>
+          <dd>${deliveryDate}</dd>
+        </div>
+        <div class="submission-card__row">
+          <dt>Payment</dt>
+          <dd>${cardSummary}</dd>
+        </div>
+      </dl>
+    </article>`;
+}
+
+function renderSubmissionsPage(submissions) {
+  const count = submissions.length;
+  const items =
+    count === 0
+      ? `<p class="empty-state">No submissions yet.</p>`
+      : `<div class="submission-list">${submissions
+          .slice()
+          .reverse()
+          .map(renderSubmissionCard)
+          .join("")}</div>`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>All Submissions</title>
+  <style>
+    ${DESIGN_TOKENS_CSS}
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 2rem 1.25rem;
+      line-height: 1.5;
+    }
+    .page { max-width: 48rem; margin: 0 auto; }
+    .page-header { margin-bottom: 1.5rem; }
+    .page-header h1 {
+      margin: 0 0 0.375rem;
+      font-size: 1.75rem;
+      color: var(--accent);
+      letter-spacing: -0.02em;
+    }
+    .page-header p { margin: 0; color: var(--muted); font-size: 0.9375rem; }
+    .empty-state {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 2rem;
+      text-align: center;
+      color: var(--muted);
+    }
+    .submission-list { display: flex; flex-direction: column; gap: 1rem; }
+    .submission-card {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 1.25rem 1.375rem;
+      box-shadow: 0 8px 24px rgba(42, 36, 24, 0.06);
+    }
+    .submission-card__header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.375rem 1rem;
+      margin-bottom: 0.875rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .submission-card__name {
+      margin: 0;
+      font-size: 1.0625rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .submission-card__time {
+      margin: 0;
+      font-size: 0.8125rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .submission-card__details { margin: 0; }
+    .submission-card__row {
+      display: grid;
+      grid-template-columns: 5.5rem 1fr;
+      gap: 0.375rem 1rem;
+      margin-bottom: 0.375rem;
+    }
+    .submission-card__row:last-child { margin-bottom: 0; }
+    .submission-card__row dt {
+      margin: 0;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--muted);
+    }
+    .submission-card__row dd {
+      margin: 0;
+      font-size: 0.9375rem;
+      word-break: break-word;
+    }
+    .actions { margin-top: 1.5rem; font-size: 0.9375rem; }
+    a { color: var(--accent); }
+    @media (max-width: 640px) {
+      body { padding: 1.25rem 1rem; }
+      .submission-card { padding: 1rem 1.125rem; border-radius: 16px; }
+      .submission-card__header { flex-direction: column; align-items: flex-start; gap: 0.25rem; }
+      .submission-card__row { grid-template-columns: 1fr; gap: 0.125rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="page-header">
+      <h1>All submissions</h1>
+      <p>${count === 0 ? "Orders will appear here after the form is submitted." : `${count} order${count === 1 ? "" : "s"} on file.`}</p>
+    </header>
+    ${items}
+    <p class="actions"><a href="/">Back to order form</a></p>
+  </div>
+</body>
+</html>`;
+}
+
+function renderConfirmationPage(submission) {
+  const summary = renderSubmissionSummary(submission, { masked: true });
+  const submittedAt = formatSubmittedAt(submission.submittedAt);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Order Submitted</title>
+  <style>
+    ${DESIGN_TOKENS_CSS}
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 2rem 1.25rem;
+      line-height: 1.5;
+    }
+    .page { max-width: 40rem; margin: 0 auto; }
+    .success-banner {
+      background: var(--success-bg);
+      border: 1px solid var(--success-border);
+      border-radius: 14px;
+      padding: 0.875rem 1.125rem;
+      margin-bottom: 1.25rem;
+      color: var(--success);
+      font-size: 0.9375rem;
+    }
+    .success-banner strong { display: block; font-size: 1rem; margin-bottom: 0.125rem; }
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      padding: 2rem;
+      box-shadow: 0 12px 40px rgba(42, 36, 24, 0.08);
+    }
+    .card-header { margin-bottom: 1.5rem; }
+    .card-header h1 {
+      margin: 0 0 0.375rem;
+      font-size: 1.5rem;
+      color: var(--accent);
+    }
+    .meta { margin: 0; color: var(--muted); font-size: 0.9375rem; }
+    .summary-section {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1rem;
+      background: rgba(255, 253, 248, 0.6);
+    }
+    .summary-section:last-of-type { margin-bottom: 0; }
+    .summary-section h2 {
+      margin: 0 0 0.75rem;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .summary-grid { margin: 0; }
+    .summary-row { display: grid; grid-template-columns: 9rem 1fr; gap: 0.5rem 1rem; margin-bottom: 0.5rem; }
+    .summary-row:last-child { margin-bottom: 0; }
+    .summary-row dt { margin: 0; font-size: 0.8125rem; font-weight: 500; color: var(--muted); }
+    .summary-row dd { margin: 0; font-size: 0.9375rem; word-break: break-word; }
+    .actions { margin-top: 1.5rem; font-size: 0.9375rem; }
+    a { color: var(--accent); }
+    @media (max-width: 640px) {
+      body { padding: 1.25rem 1rem; }
+      .card { padding: 1.25rem; border-radius: 20px; }
+      .summary-row { grid-template-columns: 1fr; gap: 0.125rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="success-banner" role="status">
+      <strong>Order submitted successfully</strong>
+      Your order has been saved. Payment details below are masked for display.
+    </div>
+    <div class="card">
+      <header class="card-header">
+        <h1>Order confirmation</h1>
+        ${submittedAt ? `<p class="meta">Submitted ${escapeHtml(submittedAt)}</p>` : ""}
+      </header>
+      ${summary}
+      <p class="actions"><a href="/">Submit another order</a> · <a href="/submissions">View all submissions</a></p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+/** Shared card layout for validation error pages */
+function renderErrorPage(title, message) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    ${DESIGN_TOKENS_CSS}
+    body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 2rem; }
+    .card { max-width: 40rem; margin: 0 auto; background: var(--paper); border: 1px solid var(--border); border-radius: 28px; padding: 2rem; box-shadow: 0 12px 40px rgba(42, 36, 24, 0.08); }
+    h1 { color: #b42318; margin-top: 0; font-size: 1.5rem; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>${escapeHtml(title)}</h1>
+    <p>${escapeHtml(message)}</p>
+    <p><a href="/">Back to order form</a></p>
+  </div>
+</body>
+</html>`;
+}
+
+// GET / — serve form with tomorrow injected as min on delivery date
+app.get("/", (req, res) => {
+  const minDate = getTomorrowISO();
+  const html = fs
+    .readFileSync(INDEX_HTML_PATH, "utf8")
+    .replace("__DELIVERY_MIN__", minDate);
+  res.type("html").send(html);
+});
+
+// Serve other static assets from public/
 app.use(express.static(path.join(__dirname, "public")));
 
 /** Read submissions from disk; default to [] if missing or invalid */
@@ -31,17 +459,32 @@ function writeSubmissions(submissions) {
   fs.writeFileSync(SUBMISSIONS_PATH, JSON.stringify(submissions, null, 2));
 }
 
-/** Escape text for safe inclusion in HTML responses */
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 // POST /submit-order — append form data and show confirmation page
 app.post("/submit-order", (req, res) => {
+  if (!isDeliveryDateValid(req.body.preferredDeliveryDate)) {
+    return res
+      .status(400)
+      .type("html")
+      .send(
+        renderErrorPage(
+          "Invalid delivery date",
+          "Preferred delivery date must be after today. Please choose a later date."
+        )
+      );
+  }
+
+  if (!isExpirationValid(req.body.expiration)) {
+    return res
+      .status(400)
+      .type("html")
+      .send(
+        renderErrorPage(
+          "Invalid card expiration",
+          "Expiration must be in MM/YY format and cannot be in the past. Please enter a valid future date."
+        )
+      );
+  }
+
   const submission = {
     ...req.body,
     id: Date.now(),
@@ -52,82 +495,13 @@ app.post("/submit-order", (req, res) => {
   submissions.push(submission);
   writeSubmissions(submissions);
 
-  const prettyJson = escapeHtml(JSON.stringify(submission, null, 2));
-
-  res.type("html").send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Order Submitted</title>
-  <style>
-    :root { --bg: #fbf7ef; --paper: #fffdf8; --accent: #6f3ff5; --border: #d8cbb9; }
-    body { font-family: system-ui, sans-serif; background: var(--bg); color: #2a2418; margin: 0; padding: 2rem; }
-    .card { max-width: 40rem; margin: 0 auto; background: var(--paper); border: 1px solid var(--border); border-radius: 28px; padding: 2rem; box-shadow: 0 12px 40px rgba(42, 36, 24, 0.08); }
-    h1 { color: var(--accent); margin-top: 0; }
-    pre { background: #f5efe3; border-radius: 14px; padding: 1rem; overflow-x: auto; font-size: 0.875rem; }
-    a { color: var(--accent); }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>Order submitted</h1>
-    <p>Your order was saved successfully. Saved record:</p>
-    <pre>${prettyJson}</pre>
-    <p><a href="/">Submit another order</a> · <a href="/submissions">View all submissions</a></p>
-  </div>
-</body>
-</html>`);
+  res.type("html").send(renderConfirmationPage(submission));
 });
 
 // GET /submissions — list every saved submission
 app.get("/submissions", (req, res) => {
   const submissions = readSubmissions();
-
-  const items =
-    submissions.length === 0
-      ? "<p>No submissions yet.</p>"
-      : submissions
-          .map((s) => {
-            const name = escapeHtml(s.fullName || "(no name)");
-            const email = escapeHtml(s.email || "(no email)");
-            const time = escapeHtml(s.submittedAt || "(no timestamp)");
-            const json = escapeHtml(JSON.stringify(s, null, 2));
-            return `
-    <article class="submission">
-      <h2>${name}</h2>
-      <p><strong>Email:</strong> ${email}</p>
-      <p><strong>Submitted:</strong> ${time}</p>
-      <pre>${json}</pre>
-    </article>`;
-          })
-          .join("");
-
-  res.type("html").send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>All Submissions</title>
-  <style>
-    :root { --bg: #fbf7ef; --paper: #fffdf8; --accent: #6f3ff5; --border: #d8cbb9; }
-    body { font-family: system-ui, sans-serif; background: var(--bg); color: #2a2418; margin: 0; padding: 2rem; }
-    .wrap { max-width: 48rem; margin: 0 auto; }
-    h1 { color: var(--accent); }
-    .submission { background: var(--paper); border: 1px solid var(--border); border-radius: 28px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 8px 24px rgba(42, 36, 24, 0.06); }
-    .submission h2 { margin-top: 0; }
-    pre { background: #f5efe3; border-radius: 14px; padding: 1rem; overflow-x: auto; font-size: 0.875rem; }
-    a { color: var(--accent); }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <h1>All submissions</h1>
-    ${items}
-    <p><a href="/">Back to order form</a></p>
-  </div>
-</body>
-</html>`);
+  res.type("html").send(renderSubmissionsPage(submissions));
 });
 
 app.listen(PORT, "0.0.0.0", () => {

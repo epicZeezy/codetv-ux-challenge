@@ -357,12 +357,11 @@
               >
             </div>
             <div class="field">
-              <label for="phone">Phone number</label>
+              <label for="phone">Phone number <span class="optional">(optional)</span></label>
               <input
                 type="tel"
                 id="phone"
                 name="phone"
-                required
                 autocomplete="tel"
                 inputmode="tel"
                 placeholder="(555) 123-4567"
@@ -392,6 +391,7 @@
                 id="preferredDeliveryDate"
                 name="preferredDeliveryDate"
                 required
+                min="__DELIVERY_MIN__"
               >
             </div>
           </div>
@@ -422,6 +422,9 @@
                 autocomplete="cc-exp"
                 inputmode="numeric"
                 placeholder="MM/YY"
+                maxlength="5"
+                pattern="(0[1-9]|1[0-2])\/[0-9]{2}"
+                title="Enter expiration as MM/YY (must not be in the past)"
               >
             </div>
             <div class="field">
